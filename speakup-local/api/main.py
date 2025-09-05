@@ -1,8 +1,16 @@
 import torch
-from TTS.tts.configs.xtts_config import XttsConfig
-from TTS.tts.models.xtts import XttsAudioConfig
 
-torch.serialization.add_safe_globals([XttsConfig, XttsAudioConfig])
+# Robust imports: class locations changed across TTS releases
+try:
+    from TTS.tts.configs.xtts_config import XttsConfig, XttsAudioConfig
+except Exception:  # fallback in case of layout differences
+    from TTS.tts.configs.xtts_config import XttsConfig
+
+    try:
+        from TTS.tts.models.xtts import XttsAudioConfig  # older/newer layouts
+    except Exception:
+        XttsAudioConfig = type("XttsAudioConfig", (), {})  # harmless stub
+
 
 import os, io, asyncio
 from typing import Optional
@@ -73,14 +81,20 @@ async def tts_endpoint(payload: dict):
     fmt = payload.get("format", TTS_FORMAT)
     tts = get_tts()
     wav = tts.tts(text=text, speaker=voice, language=lang)
+
+    SR = 24000
+
     buf = io.BytesIO()
-    sf.write(buf, wav, samplerate=22050, format="WAV", subtype="PCM_16")
+    sf.write(buf, wav, samplerate=SR, format="WAV", subtype="PCM_16")
     wav_bytes = buf.getvalue()
+
     if fmt == "wav":
         return Response(content=wav_bytes, media_type="audio/wav")
+
     audio = AudioSegment.from_file(io.BytesIO(wav_bytes), format="wav")
+    audio = audio.set_frame_rate(SR)
     out = io.BytesIO()
-    audio.export(out, format="mp3", bitrate="128k")
+    audio.export(out, format="mp3", parameters=["-q:a", "3", "-ar", str(SR)])
     return Response(content=out.getvalue(), media_type="audio/mpeg")
 
 
@@ -93,7 +107,6 @@ def _guess_format_from_ct(ct: Optional[str]) -> Optional[str]:
     if "mpeg" in ct or "mp3" in ct:
         return "mp3"
     if "ogg" in ct:
-        # most browser mics send ogg/opus
         return "ogg"
     if "webm" in ct:
         return "webm"
@@ -102,27 +115,39 @@ def _guess_format_from_ct(ct: Optional[str]) -> Optional[str]:
     return None
 
 
+MAX_BYTES = 15 * 1024 * 1024  # 15 MB
+MAX_SECONDS = 25  # keep kid turns short
+
+
 @app.post("/stt")
 async def stt_endpoint(file: UploadFile = File(...), language: Optional[str] = "ru"):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio upload")
+    if len(data) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Audio too large")
 
     src_fmt = _guess_format_from_ct(file.content_type)
     try:
-        # tell ffmpeg the container/codec when we know it
-        if src_fmt:
-            audio = AudioSegment.from_file(io.BytesIO(data), format=src_fmt)
-        else:
-            # fallback: let ffmpeg sniff headers
-            audio = AudioSegment.from_file(io.BytesIO(data))
+        audio = (
+            AudioSegment.from_file(io.BytesIO(data), format=src_fmt)
+            if src_fmt
+            else AudioSegment.from_file(io.BytesIO(data))
+        )
     except Exception as e:
-        # give a helpful error back
         raise HTTPException(
             status_code=400, detail=f"Could not decode audio ({file.content_type}). {e}"
         )
 
+    # normalize for Whisper
     audio = audio.set_channels(1).set_frame_rate(16000)
+
+    # fast duration check before export
+    if audio.duration_seconds > MAX_SECONDS:
+        raise HTTPException(
+            status_code=400, detail=f"Audio too long ({audio.duration_seconds:.1f}s)"
+        )
+
     buf = io.BytesIO()
     audio.export(buf, format="wav")
     buf.seek(0)
