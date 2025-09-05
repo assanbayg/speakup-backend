@@ -11,7 +11,6 @@ except Exception:  # fallback in case of layout differences
     except Exception:
         XttsAudioConfig = type("XttsAudioConfig", (), {})  # harmless stub
 
-
 import os, io, asyncio
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -27,7 +26,8 @@ WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "medium")
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
 TORCH_DEVICE = os.getenv("TORCH_DEVICE", "cpu")
 XTTS_LANG = os.getenv("XTTS_LANG", "ru")
-XTTS_VOICE = os.getenv("XTTS_VOICE", "speaker_0")
+
+XTTS_VOICE = os.getenv("XTTS_VOICE", "Gracie Wise") 
 TTS_FORMAT = os.getenv("TTS_FORMAT", "mp3")
 
 app = FastAPI(title="SpeakUpNew API (local)")
@@ -59,6 +59,23 @@ async def health():
     return {"ok": True}
 
 
+@app.get("/speakers")
+async def list_speakers():
+    """Get available speakers for debugging"""
+    try:
+        tts = get_tts()
+        if (
+            hasattr(tts.synthesizer.tts_model, "speaker_manager")
+            and tts.synthesizer.tts_model.speaker_manager
+        ):
+            speakers = list(tts.synthesizer.tts_model.speaker_manager.speakers.keys())
+            return {"speakers": speakers}
+        else:
+            return {"speakers": [], "note": "No speaker manager found"}
+    except Exception as e:
+        return {"error": str(e), "speakers": []}
+
+
 @app.post("/chat")
 async def chat(payload: dict):
     model = payload.get("model", LLM_MODEL)
@@ -80,7 +97,32 @@ async def tts_endpoint(payload: dict):
     lang = payload.get("lang", XTTS_LANG)
     fmt = payload.get("format", TTS_FORMAT)
     tts = get_tts()
-    wav = tts.tts(text=text, speaker=voice, language=lang)
+
+    # Handle speaker parameter properly
+    kwargs = {"text": text, "language": lang}
+
+    # Only add speaker if it's not None and exists
+    if voice is not None:
+        # Check if speaker exists
+        if (
+            hasattr(tts.synthesizer.tts_model, "speaker_manager")
+            and tts.synthesizer.tts_model.speaker_manager
+        ):
+            available_speakers = list(
+                tts.synthesizer.tts_model.speaker_manager.speakers.keys()
+            )
+            if voice in available_speakers:
+                kwargs["speaker"] = voice
+            else:
+                # Log available speakers for debugging
+                print(
+                    f"Warning: Speaker '{voice}' not found. Available speakers: {available_speakers}"
+                )
+                # Use first available speaker or skip speaker parameter
+                if available_speakers:
+                    kwargs["speaker"] = available_speakers[0]
+
+    wav = tts.tts(**kwargs)
 
     SR = 24000
 
@@ -162,14 +204,34 @@ async def stt_endpoint(file: UploadFile = File(...), language: Optional[str] = "
 async def warmup():
     async def _w():
         try:
-            _ = get_tts().tts(text="Привет!", speaker=XTTS_VOICE, language=XTTS_LANG)
-        except:
-            pass
-        _ = get_stt()
+            # Use the same logic as the endpoint for consistency
+            tts = get_tts()
+            kwargs = {"text": "Привет!", "language": XTTS_LANG}
+            if XTTS_VOICE is not None:
+                if (
+                    hasattr(tts.synthesizer.tts_model, "speaker_manager")
+                    and tts.synthesizer.tts_model.speaker_manager
+                ):
+                    available_speakers = list(
+                        tts.synthesizer.tts_model.speaker_manager.speakers.keys()
+                    )
+                    if XTTS_VOICE in available_speakers:
+                        kwargs["speaker"] = XTTS_VOICE
+                    elif available_speakers:
+                        kwargs["speaker"] = available_speakers[0]
+            _ = tts.tts(**kwargs)
+        except Exception as e:
+            print(f"TTS warmup failed: {e}")
+
+        try:
+            _ = get_stt()
+        except Exception as e:
+            print(f"STT warmup failed: {e}")
+
         async with httpx.AsyncClient(timeout=5) as c:
             try:
                 await c.get(f"{OLLAMA}/api/tags")
-            except:
-                pass
+            except Exception as e:
+                print(f"Ollama connection failed: {e}")
 
     asyncio.create_task(_w())

@@ -21,7 +21,6 @@ services:
       - LLM_MODEL=qwen2.5:3b-instruct-q4_K_M
       - WHISPER_MODEL=medium
       - WHISPER_COMPUTE=int8
-      # - XTTS_VOICE=speaker_0
       - XTTS_LANG=ru
       - TTS_FORMAT=mp3
       - TORCH_DEVICE=cpu
