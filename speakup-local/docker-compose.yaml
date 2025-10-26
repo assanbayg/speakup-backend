@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   ollama:
     image: ollama/ollama:latest
@@ -11,15 +9,15 @@ services:
       - OLLAMA_KEEP_ALIVE=24h
 
   api:
-    build: ./api
+    image: assanbayg/speakup-api:latest
     container_name: speakup-api
     depends_on: [ollama]
     restart: unless-stopped
     ports: ["8080:8080"]
     environment:
       - OLLAMA_URL=http://ollama:11434
-      - LLM_MODEL=qwen2.5:3b-instruct-q4_K_M
-      - WHISPER_MODEL=medium
+      - LLM_MODEL=qwen2.5:1.5b-instruct-q4_K_M
+      - WHISPER_MODEL=small
       - WHISPER_COMPUTE=int8
       - XTTS_LANG=ru
       - TTS_FORMAT=mp3

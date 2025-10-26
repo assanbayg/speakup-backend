@@ -2,7 +2,10 @@
 FROM python:3.11-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  ffmpeg git build-essential \
+  ffmpeg git build-essential pkg-config \
+  libavcodec-dev libavformat-dev libavutil-dev \
+  libavdevice-dev libavfilter-dev \
+  libswscale-dev libswresample-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
