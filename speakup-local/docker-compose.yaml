@@ -1,5 +1,6 @@
 services:
   ollama:
+    build: ./api
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
