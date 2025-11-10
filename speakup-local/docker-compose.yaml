@@ -1,6 +1,5 @@
 services:
   ollama:
-    build: ./api
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
@@ -8,23 +7,17 @@ services:
     volumes: ["ollama:/root/.ollama"]
     environment:
       - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_GPU=0
+      - OLLAMA_HOST=0.0.0.0:11434
 
   api:
-    image: assanbayg/speakup-api:latest
+    build: ./api
     container_name: speakup-api
-    depends_on: [ollama]
+    depends_on:
+      - ollama
     restart: unless-stopped
     ports: ["8080:8080"]
-    environment:
-      - OLLAMA_URL=http://ollama:11434
-      - LLM_MODEL=qwen2.5:1.5b-instruct-q4_K_M
-      - WHISPER_MODEL=small
-      - WHISPER_COMPUTE=int8
-      - XTTS_LANG=ru
-      - TTS_FORMAT=mp3
-      - TORCH_DEVICE=cpu
-      - PRIVACY_DISABLE_LOGS=true
-      - COQUI_TOS_AGREED=1
-
+    env_file:
+      - .env
 volumes:
   ollama:
