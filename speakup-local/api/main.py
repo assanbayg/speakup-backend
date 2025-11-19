@@ -19,7 +19,12 @@ import httpx, soundfile as sf
 from pydub import AudioSegment
 from TTS.api import TTS
 from faster_whisper import WhisperModel
+from pydantic import BaseModel
 
+class ChatRequest(BaseModel): 
+    message: str
+    model: Optional[str] = None
+    
 OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "medium")
@@ -89,6 +94,28 @@ async def chat(payload: dict):
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
+
+
+@app.post("/chat/sync")
+async def chat_sync(request: ChatRequest):
+    """Non-streaming version for mobile clients"""
+    model = request.model or LLM_MODEL
+    messages = [{"role": "user", "content": request.message}]
+    body = {"model": model, "stream": False, "messages": messages}
+    
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            response = await client.post(f"{OLLAMA}/api/chat", json=body)
+            response.raise_for_status()
+            data = response.json()
+            # Return directly here
+            return {"response": data.get("message", {}).get("content", "")}
+        except httpx.HTTPError as e:
+            print(f"Ollama API Error: {e}") # Helpful for docker logs
+            raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")
+        except Exception as e:
+            print(f"General Error: {e}") # Helpful for docker logs
+            raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 @app.post("/tts")
 async def tts_endpoint(payload: dict):
