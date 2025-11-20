@@ -20,10 +20,14 @@ from pydub import AudioSegment
 from TTS.api import TTS
 from faster_whisper import WhisperModel
 from pydantic import BaseModel
+from supabase import create_client, Client
 
 class ChatRequest(BaseModel): 
     message: str
     model: Optional[str] = None
+    
+class DeleteUserRequest(BaseModel):
+    user_id: str
     
 OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
@@ -34,6 +38,16 @@ XTTS_LANG = os.getenv("XTTS_LANG", "ru")
 
 XTTS_VOICE = os.getenv("XTTS_VOICE", "Gracie Wise") 
 TTS_FORMAT = os.getenv("TTS_FORMAT", "mp3")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
+
+supabase: Optional[Client] = None
+
+if SUPABASE_URL and SUPABASE_SECRET_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+else:
+    print("Warning: Supabase keys not found. Auth endpoints will be disabled.")
 
 app = FastAPI(title="SpeakUpNew API (local)")
 
@@ -63,7 +77,16 @@ def get_stt():
 async def health():
     return {"ok": True}
 
+@app.post("/delete-user")
+async def delete_user(req: DeleteUserRequest):
+    """Sends request to Supabase Admin to delete user"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Service unavailable: Supabase not configured")
+    response = supabase.auth.admin.delete_user(req.user_id)
+        if response is None:
+            raise HTTPException(status_code=500, detail="User doesn't exist")
 
+        
 @app.get("/speakers")
 async def list_speakers():
     """Get available speakers for debugging"""
