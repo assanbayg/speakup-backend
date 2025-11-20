@@ -14,3 +14,10 @@ curl -X POST http://localhost:8080/tts \
 
 # STT (transcribe back the mp3)
 curl -X POST http://localhost:8080/stt -F "file=@speech.mp3"
+
+curl -N -X POST https://api.randomdodopizza.xyz/chat/sync \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[
+    {"role":"system","content":"Ты — Спичи, логопед-помощник. Коротко, по-русски, доброжелательно."},
+    {"role":"user","content":"Привет! Научи говорить звук Р."}
+]}'
