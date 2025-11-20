@@ -30,8 +30,8 @@ class DeleteUserRequest(BaseModel):
     user_id: str
     
 OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct-q4_K_M")
-WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "medium")
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:1b")
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
 TORCH_DEVICE = os.getenv("TORCH_DEVICE", "cpu")
 XTTS_LANG = os.getenv("XTTS_LANG", "ru")
