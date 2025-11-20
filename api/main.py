@@ -49,7 +49,7 @@ if SUPABASE_URL and SUPABASE_SECRET_KEY:
 else:
     print("Warning: Supabase keys not found. Auth endpoints will be disabled.")
 
-app = FastAPI(title="SpeakUpNew API (local)")
+app = FastAPI(title="SpeakUP API")
 
 tts_model = None
 stt_model = None
