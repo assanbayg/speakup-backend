@@ -14,6 +14,9 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
   && pip install --default-timeout=240 --no-cache-dir -r requirements.txt
 
+# NOTE: Model pre-caching removed to save disk space during build
+# Model will download on first API call (~150MB, takes ~30s)
+
 # Runtime 
 FROM python:3.11-slim
 
@@ -32,6 +35,7 @@ COPY main.py /app/main.py
 ENV PYTHONUNBUFFERED=1
 ENV COQUI_TOS_AGREED=1
 ENV TORCH_DEVICE=cpu
+ENV HF_HOME=/root/.cache/huggingface
 
 # Run FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
