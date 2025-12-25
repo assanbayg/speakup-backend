@@ -19,5 +19,9 @@ services:
     ports: ["8080:8080"]
     env_file:
       - .env
+    volumes:
+      - sprites:/app/sprites
+
 volumes:
   ollama:
+  sprites:

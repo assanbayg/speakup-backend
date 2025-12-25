@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import FastAPI
 
-from routes import auth, chat, stt, tts
+from routes import auth, chat, stt, tts, sprites 
 from services import supabase
 from services import tts as tts_service
 from services import stt as stt_service
@@ -15,6 +15,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(stt.router)
 app.include_router(tts.router)
+app.include_router(sprites.router)  
 
 
 @app.get("/health")

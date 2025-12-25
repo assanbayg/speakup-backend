@@ -22,3 +22,5 @@ SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
 # Limits
 MAX_AUDIO_BYTES = 15 * 1024 * 1024  # 15 MB
 MAX_AUDIO_SECONDS = 25  # keep kid turns short
+MAX_SPRITE_BYTES = 5 * 1024 * 1024  # 5 MB per sprite
+ALLOWED_SPRITE_FORMATS = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
