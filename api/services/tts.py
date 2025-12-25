@@ -1,25 +1,24 @@
 import io
+import os
 from typing import Optional, List
 
 import soundfile as sf
 from pydub import AudioSegment
-
-# Robust imports: class locations changed across TTS releases
-try:
-    from TTS.tts.configs.xtts_config import XttsConfig, XttsAudioConfig
-except Exception:
-    from TTS.tts.configs.xtts_config import XttsConfig
-    try:
-        from TTS.tts.models.xtts import XttsAudioConfig
-    except Exception:
-        XttsAudioConfig = type("XttsAudioConfig", (), {})  # harmless stub
-
 from TTS.api import TTS
 
-from config import XTTS_LANG, XTTS_VOICE
+from config import XTTS_LANG
 
 _model: Optional[TTS] = None
 SAMPLE_RATE = 24000
+
+# Voice configuration
+VOICES_DIR = os.path.join(os.path.dirname(__file__), "..", "voices")
+DEFAULT_SPEAKER = "Claribel Dervla" 
+
+# Place wav files in api/voices/ directory
+CUSTOM_VOICES = {
+    "aiym": "aiym.wav", 
+}
 
 
 def get_model() -> TTS:
@@ -31,30 +30,10 @@ def get_model() -> TTS:
 
 
 def list_speakers() -> List[str]:
-    """Get available speaker names."""
-    tts = get_model()
-    if (
-        hasattr(tts.synthesizer.tts_model, "speaker_manager")
-        and tts.synthesizer.tts_model.speaker_manager
-    ):
-        return list(tts.synthesizer.tts_model.speaker_manager.speakers.keys())
-    return []
-
-
-def _resolve_speaker(voice: Optional[str]) -> Optional[str]:
-    """Resolve speaker name, falling back to first available if not found."""
-    if voice is None:
-        return None
-    
-    available = list_speakers()
-    if not available:
-        return None
-    
-    if voice in available:
-        return voice
-    
-    print(f"Warning: Speaker '{voice}' not found. Available: {available}")
-    return available[0] if available else None
+    """Get available voices (default + custom)."""
+    voices = ["default"]
+    voices.extend(CUSTOM_VOICES.keys())
+    return voices
 
 
 def synthesize(
@@ -67,7 +46,7 @@ def synthesize(
     
     Args:
         text: Text to synthesize
-        voice: Speaker name (optional)
+        voice: "default" or custom voice name
         lang: Language code
         output_format: 'wav' or 'mp3'
     
@@ -75,13 +54,20 @@ def synthesize(
         Audio bytes in requested format
     """
     tts = get_model()
+    voice = voice or "default"
     
-    kwargs = {"text": text, "language": lang}
-    speaker = _resolve_speaker(voice or XTTS_VOICE)
-    if speaker:
-        kwargs["speaker"] = speaker
-    
-    wav = tts.tts(**kwargs)
+    if voice == "default":
+        # Use XTTS prebuilt speaker
+        wav = tts.tts(text=text, language=lang, speaker=DEFAULT_SPEAKER)
+    elif voice in CUSTOM_VOICES:
+        # Use voice cloning with reference audio
+        ref_path = os.path.join(VOICES_DIR, CUSTOM_VOICES[voice])
+        if not os.path.exists(ref_path):
+            raise FileNotFoundError(f"Voice file not found: {ref_path}")
+        wav = tts.tts(text=text, language=lang, speaker_wav=ref_path)
+    else:
+        print(f"Unknown voice '{voice}', falling back to default")
+        wav = tts.tts(text=text, language=lang, speaker=DEFAULT_SPEAKER)
     
     # Convert to WAV bytes
     buf = io.BytesIO()

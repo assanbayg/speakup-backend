@@ -14,7 +14,7 @@ async def list_speakers():
         speakers = tts.list_speakers()
         return {
             "speakers": speakers,
-            "default": XTTS_VOICE,
+            "default": "default",
         }
     except Exception as e:
         return {"error": str(e), "speakers": [], "default": None}

@@ -29,6 +29,7 @@ COPY --from=builder /usr/local /usr/local
 COPY main.py config.py utils.py /app/
 COPY services/ /app/services/
 COPY routes/ /app/routes/
+COPY voices/ /app/voices/
 
 # Set envs
 ENV PYTHONUNBUFFERED=1
