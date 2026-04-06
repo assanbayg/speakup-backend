@@ -1,14 +1,26 @@
-"""Chat service — Ollama LLM integration."""
+"""Chat service — Groq API with Ollama fallback."""
 
 from typing import Optional, List, Dict, Any, AsyncIterator
 from collections import OrderedDict
+import os
+import json
 
 import httpx
 
 from config import OLLAMA_URL, LLM_MODEL
 
 # ---------------------------------------------------------------------------
-# In-memory conversation history (keyed by session_id)
+# Groq config
+# ---------------------------------------------------------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+def _use_groq() -> bool:
+    return bool(GROQ_API_KEY)
+
+# ---------------------------------------------------------------------------
+# In-memory conversation history
 # ---------------------------------------------------------------------------
 MAX_SESSIONS = 200
 MAX_MESSAGES_PER_SESSION = 20
@@ -38,7 +50,7 @@ def clear_history(session_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# System prompt — flat, no branching. 1.5B models can't handle conditionals.
+# System prompt
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """Ты — Спичи, весёлый и любопытный друг-собеседник для ребёнка.
@@ -60,12 +72,77 @@ _SYSTEM_PROMPT = """Ты — Спичи, весёлый и любопытный 
 def _prepare_messages(
     messages: List[Dict[str, str]],
 ) -> List[Dict[str, str]]:
-    """Prepend system prompt to messages."""
     return [{"role": "system", "content": _SYSTEM_PROMPT}] + messages
 
 
 # ---------------------------------------------------------------------------
-# Ollama options
+# Groq API call
+# ---------------------------------------------------------------------------
+
+async def _groq_chat(messages: List[Dict[str, str]]) -> str:
+    """Call Groq API (OpenAI-compatible)."""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": 150,
+        "temperature": 0.7,
+        "top_p": 0.9,
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(GROQ_URL, headers=headers, json=body)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def _groq_chat_stream(messages: List[Dict[str, str]]) -> AsyncIterator[bytes]:
+    """Stream from Groq API."""
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": 150,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "stream": True,
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        async with client.stream("POST", GROQ_URL, headers=headers, json=body) as r:
+            async for line in r.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload)
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        # Emit in Ollama-compatible ndjson format so the
+                        # Flutter streaming client doesn't need changes
+                        ollama_chunk = json.dumps({
+                            "message": {"role": "assistant", "content": content},
+                            "done": False,
+                        })
+                        yield (ollama_chunk + "\n").encode()
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+            # Send final done message
+            yield json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}).encode()
+
+
+# ---------------------------------------------------------------------------
+# Ollama fallback
 # ---------------------------------------------------------------------------
 
 _OLLAMA_OPTIONS = {
@@ -76,24 +153,51 @@ _OLLAMA_OPTIONS = {
 }
 
 
+async def _ollama_chat(messages: List[Dict[str, str]]) -> str:
+    body = {
+        "model": LLM_MODEL,
+        "stream": False,
+        "messages": messages,
+        "options": _OLLAMA_OPTIONS,
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(f"{OLLAMA_URL}/api/chat", json=body)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("message", {}).get("content", "")
+
+
+async def _ollama_chat_stream(messages: List[Dict[str, str]]) -> AsyncIterator[bytes]:
+    body = {
+        "model": LLM_MODEL,
+        "stream": True,
+        "messages": messages,
+        "options": _OLLAMA_OPTIONS,
+    }
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
+            async for chunk in r.aiter_bytes():
+                yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Public API (unchanged contract)
+# ---------------------------------------------------------------------------
+
 async def chat_stream(
     messages: List[Dict[str, str]],
     model: Optional[str] = None,
     metrics: Optional[Dict[str, Any]] = None,
 ) -> AsyncIterator[bytes]:
-    """Stream chat response from Ollama."""
+    """Stream chat response."""
     prepared = _prepare_messages(messages)
-    body = {
-        "model": LLM_MODEL,  # always use server config
-        "stream": True,
-        "messages": prepared,
-        "options": _OLLAMA_OPTIONS,
-    }
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
-            async for chunk in r.aiter_bytes():
-                yield chunk
+    if _use_groq():
+        async for chunk in _groq_chat_stream(prepared):
+            yield chunk
+    else:
+        async for chunk in _ollama_chat_stream(prepared):
+            yield chunk
 
 
 async def chat_sync(
@@ -106,34 +210,39 @@ async def chat_sync(
     sid = session_id or "_default"
 
     _append_history(sid, "user", message)
-
     history = _get_history(sid)
     prepared = _prepare_messages(list(history))
 
-    body = {
-        "model": LLM_MODEL,  # always use server config, ignore client
-        "stream": False,
-        "messages": prepared,
-        "options": _OLLAMA_OPTIONS,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(f"{OLLAMA_URL}/api/chat", json=body)
-        response.raise_for_status()
-        data = response.json()
-        assistant_text = data.get("message", {}).get("content", "")
+    if _use_groq():
+        print(f"[CHAT] Using Groq ({GROQ_MODEL})")
+        assistant_text = await _groq_chat(prepared)
+    else:
+        print(f"[CHAT] Using Ollama ({LLM_MODEL})")
+        assistant_text = await _ollama_chat(prepared)
 
     _append_history(sid, "assistant", assistant_text)
-
     return assistant_text
 
 
 async def check_connection() -> bool:
-    """Check if Ollama is reachable."""
-    async with httpx.AsyncClient(timeout=5) as client:
+    """Check if LLM backend is reachable."""
+    if _use_groq():
         try:
-            await client.get(f"{OLLAMA_URL}/api/tags")
-            return True
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                )
+                print(f"Groq connection OK (status={r.status_code})")
+                return r.status_code == 200
         except Exception as e:
-            print(f"Ollama connection failed: {e}")
+            print(f"Groq connection failed: {e}")
             return False
+    else:
+        async with httpx.AsyncClient(timeout=5) as client:
+            try:
+                await client.get(f"{OLLAMA_URL}/api/tags")
+                return True
+            except Exception as e:
+                print(f"Ollama connection failed: {e}")
+                return False
