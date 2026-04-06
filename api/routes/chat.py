@@ -13,7 +13,7 @@ router = APIRouter(tags=["chat"])
 
 class ChatSyncRequest(BaseModel):
     message: str
-    model: Optional[str] = None
+    model: Optional[str] = None      # accepted but ignored
     metrics: Optional[dict] = None
     character: Optional[str] = None
     session_id: Optional[str] = None  # optional, backward compatible
@@ -22,12 +22,11 @@ class ChatSyncRequest(BaseModel):
 @router.post("/chat")
 async def chat_stream_endpoint(payload: dict):
     """Streaming chat with Ollama."""
-    model = payload.get("model", LLM_MODEL)
     messages = payload.get("messages", [])
-    metrics = payload.get("metrics")
+    # model from client is intentionally ignored
 
     async def generate():
-        async for chunk in chat.chat_stream(messages, model=model, metrics=metrics):
+        async for chunk in chat.chat_stream(messages):
             yield chunk
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
@@ -39,7 +38,6 @@ async def chat_sync_endpoint(request: ChatSyncRequest):
     try:
         response = await chat.chat_sync(
             message=request.message,
-            model=request.model,
             metrics=request.metrics,
             session_id=request.session_id,
         )
