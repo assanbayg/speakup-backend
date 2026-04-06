@@ -16,6 +16,7 @@ class ChatSyncRequest(BaseModel):
     model: Optional[str] = None
     metrics: Optional[dict] = None
     character: Optional[str] = None
+    session_id: Optional[str] = None  # optional, backward compatible
 
 
 @router.post("/chat")
@@ -24,11 +25,11 @@ async def chat_stream_endpoint(payload: dict):
     model = payload.get("model", LLM_MODEL)
     messages = payload.get("messages", [])
     metrics = payload.get("metrics")
-    
+
     async def generate():
         async for chunk in chat.chat_stream(messages, model=model, metrics=metrics):
             yield chunk
-    
+
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
@@ -40,6 +41,7 @@ async def chat_sync_endpoint(request: ChatSyncRequest):
             message=request.message,
             model=request.model,
             metrics=request.metrics,
+            session_id=request.session_id,
         )
         return {"response": response}
     except httpx.HTTPError as e:
